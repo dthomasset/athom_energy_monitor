@@ -1,6 +1,10 @@
 /**
  * Athom Energy Meter
  *
+ * Author: Dan Thomasset <dthomas@gmail.com>
+ * Date: 2025-12-29
+ *
+ * Description:
  * A comprehensive energy monitoring suite for the Athom 6-Channel (ESPHome) Meter.
  * Transforms raw sensor data into actionable home intelligence via a native, 
  * zero-dependency EventStream connection.
@@ -8,23 +12,24 @@
  * CORE FEATURES:
  * 1. INTELLIGENT MONITORING
  * - Grid Health Watchdog: Real-time detection of Voltage Sags (Brownouts) and Spikes (Surges).
- * - Phase Balancing: Monitors Split-Phase (Leg A/B) loads and calculates Imbalance %.
+ * - Phase Balancing (Optional): Monitors Split-Phase (Leg A/B) loads and calculates Imbalance %.
  * - Vampire Hunter: Tracks the "Lowest Daily Wattage" for every circuit to identify phantom loads.
+ *
  * 2. APPLIANCE & SAFETY LOGIC
  * - Breaker Monitoring: Calculates real-time Breaker Load % based on configurable amp ratings.
  * - Runtime Tracker: Monitors "Continuous Runtime" (Current Cycle) and "Daily Active Time" (Total Minutes).
  * - Idle Monitor: Tracks "Hours Since Last Run" (Crucial for Freeze Protection/Heater logic).
+ *
  * 3. DATA MANAGEMENT
  * - Native EventStream: Uses raw socket SSE for stable, sub-second reporting without polling loops.
  * - Auto-Discovery: Automatically detects channel count (4, 6, 8+) and creates child devices.
  * - Daily Reset: Snapshots and resets Energy (kWh) and Runtime metrics at midnight automatically.
- * - Smart Synchronization: Updates Parent and Child devices in a single atomic snapshot for perfect data consistency.
+ * - Smart Synchronization: Updates Parent and Child devices in a single atomic snapshot.
+ *
  * 4. CONFIGURATION
  * - Granular Thresholds: Configurable change detection for Volts, Amps, Watts, and Hz.
  * - Rate Limiting: Global and per-sensor hysteresis to prevent hub database flooding.
  * - Dynamic Naming: Map friendly names (e.g., "Fridge, Solar") to channels in preferences.
- *
- *  Contact: dthomas@gmail.com with any questions.
  */
 
 metadata {
@@ -44,11 +49,11 @@ metadata {
         attribute "connectionState", "string"
         attribute "gridStatus", "string" // Normal, Brownout, Surge
         
-        // Phase Attributes
+        // Phase Attributes (Optional)
         attribute "phaseA_Amps", "number"
         attribute "phaseB_Amps", "number"
-        attribute "phaseImbalance", "number" // Percentage
-        attribute "phaseStatus", "string" // Balanced, Warning
+        attribute "phaseImbalance", "number" 
+        attribute "phaseStatus", "string" 
         
         command "resetDailyEnergy"
         command "disconnect"
@@ -62,7 +67,8 @@ metadata {
             input name: "logEnable", type: "bool", title: "Enable Debug Logging", defaultValue: true
         }
         
-        section("Phase Balancing (Split Phase 120/240V)") {
+        section("Phase Balancing (Optional)") {
+            input name: "enablePhaseMonitoring", type: "bool", title: "Enable Phase Monitoring", description: "Turn on for split-phase panels. Turn off if monitoring a single phase.", defaultValue: false
             input name: "phaseA_Channels", type: "text", title: "Phase A Channels", description: "Comma separated (e.g: 1,3,5)", defaultValue: "1,3,5"
             input name: "phaseB_Channels", type: "text", title: "Phase B Channels", description: "Comma separated (e.g: 2,4,6)", defaultValue: "2,4,6"
             input name: "imbalanceThreshold", type: "number", title: "Imbalance Alert Threshold (%)", defaultValue: 50
@@ -118,7 +124,7 @@ void updated() {
     if (!state.lowestWatts) state.lowestWatts = [:]
     if (!state.activeStart) state.activeStart = [:] 
     if (!state.dailyActive) state.dailyActive = [:] 
-    if (!state.lastRunTime) state.lastRunTime = [:] // Epoch of last run
+    if (!state.lastRunTime) state.lastRunTime = [:] 
     state.lastDutyCheck = now()
 }
 
@@ -262,11 +268,13 @@ void syncSystem() {
         totalEnergy += dailyE
         totalCurrent += a
         
-        // Phase Allocation
-        if (phaseA.contains(c)) ampsA += a
-        else if (phaseB.contains(c)) ampsB += a
+        // Phase Allocation (Only if enabled)
+        if (enablePhaseMonitoring) {
+            if (phaseA.contains(c)) ampsA += a
+            else if (phaseB.contains(c)) ampsB += a
+        }
         
-        // 1. VAMPIRE HUNTER (Lowest Watts)
+        // 1. VAMPIRE HUNTER
         if (!state.lowestWatts) state.lowestWatts = [:]
         def currentLowest = state.lowestWatts[c]
         if ((currentLowest == null) || (p > 0 && p < currentLowest)) {
@@ -276,12 +284,11 @@ void syncSystem() {
              if (child.currentValue("lowestDailyWatts") == null) checkAndSend(child, "lowestDailyWatts", currentLowest, "W", 0.5)
         }
 
-        // 2. RUNTIME / HEATER / PUMP MONITOR
+        // 2. RUNTIME MONITOR
         def threshold = activeThreshold ?: 10
         def isApplianceOn = (p >= threshold)
         
         if (isApplianceOn) {
-            // Running NOW
             if (!state.activeStart) state.activeStart = [:]
             if (!state.activeStart[c]) state.activeStart[c] = nowMs
             
@@ -289,33 +296,28 @@ void syncSystem() {
             def minutes = Math.round((durationMs / 60000) * 10) / 10
             checkAndSend(child, "continuousRuntime", minutes, "min", 1.0)
             
-            // Update Daily Total
             if (!state.dailyActive) state.dailyActive = [:]
             def currentDaily = state.dailyActive[c] ?: 0.0
             state.dailyActive[c] = currentDaily + timeDeltaMinutes
             
-            // Mark Last Run Time as NOW
             if (!state.lastRunTime) state.lastRunTime = [:]
             state.lastRunTime[c] = nowMs
             checkAndSend(child, "hoursSinceLastRun", 0.0, "hrs", 0.1)
             
         } else {
-            // Stopped
             if (state.activeStart && state.activeStart[c]) {
                 state.activeStart.remove(c)
                 checkAndSend(child, "continuousRuntime", 0, "min", 0.1)
             }
             
-            // Calculate Hours Since Last Run (For Heater Freeze Alerts)
             if (!state.lastRunTime) state.lastRunTime = [:]
             if (state.lastRunTime[c]) {
                 def diffMs = nowMs - state.lastRunTime[c]
-                def hours = Math.round((diffMs / 3600000.0) * 100) / 100 // 2 decimals
+                def hours = Math.round((diffMs / 3600000.0) * 100) / 100 
                 checkAndSend(child, "hoursSinceLastRun", hours, "hrs", 0.5)
             }
         }
         
-        // Send Daily Active Total (For Pool Pump Alerts)
         if (state.dailyActive && state.dailyActive[c]) {
              def dailyMins = Math.round(state.dailyActive[c] * 10) / 10
              checkAndSend(child, "dailyActiveTime", dailyMins, "min", 1.0)
@@ -340,16 +342,16 @@ void syncSystem() {
     updateSensor("energy", totalEnergy, "kWh", energyThreshold, true)
     updateSensor("amperage", totalCurrent, "A", ampsThreshold, true)
     
-    // --- PHASE BALANCE CALC ---
-    calculatePhaseBalance(ampsA, ampsB)
+    // --- PHASE BALANCE ---
+    if (enablePhaseMonitoring) {
+        calculatePhaseBalance(ampsA, ampsB)
+    }
 }
 
 void calculatePhaseBalance(def a, def b) {
     updateSensor("phaseA_Amps", clamp(a), "A", 0.1, true)
     updateSensor("phaseB_Amps", clamp(b), "A", 0.1, true)
     
-    // Calculate Imbalance %
-    // Formula: difference / max * 100
     def max = Math.max(a, b)
     def diff = Math.abs(a - b)
     def pct = (max > 0) ? ((diff / max) * 100.0) : 0.0
@@ -357,7 +359,7 @@ void calculatePhaseBalance(def a, def b) {
     updateSensor("phaseImbalance", clamp(pct), "%", 1.0, true)
     
     def warnLevel = imbalanceThreshold ?: 50
-    String pStatus = (pct > warnLevel && max > 5) ? "Warning" : "Balanced" // Ignore low load imbalance
+    String pStatus = (pct > warnLevel && max > 5) ? "Warning" : "Balanced" 
     
     if (device.currentValue("phaseStatus") != pStatus) {
         sendEvent(name: "phaseStatus", value: pStatus)
