@@ -2,9 +2,9 @@ This is a comprehensive `README.md` designed to document every aspect of the "Ma
 
 ---
 
-# Athom 6-Channel Energy Meter (Master Monitor Edition)
+# Athom Multi-Channel Energy Meter (Master Monitor Edition)
 
-A robust, "No-Dependency" Hubitat driver for the **Athom 6-Channel Energy Meter** (ESPHome).
+A robust, "No-Dependency" Hubitat driver for the **Athom Multi-Channel Energy Meter** (ESPHome).
 
 This driver completely replaces standard HTTP polling with a **Native EventStream (SSE) connection**, providing real-time data stability without the disconnect loops common with generic drivers. It transforms the device from a simple "Power Meter" into a **Whole-Home Energy Monitor**, capable of tracking Grid Health, Phase Balance, and Appliance Health.
 
@@ -44,7 +44,7 @@ This driver completely replaces standard HTTP polling with a **Native EventStrea
 
 ## 📦 Installation
 
-1. **Copy the Code:** Copy the entire Groovy code from the `Athom 6-Channel Energy Meter (Master).groovy` file.
+1. **Copy the Code:** Copy the entire Groovy code from the `AthomEnergyMeter.groovy` file.
 2. **Hubitat Driver:**
 * Go to **Drivers Code** -> **New Driver**.
 * Paste the code.
@@ -54,7 +54,7 @@ This driver completely replaces standard HTTP polling with a **Native EventStrea
 3. **Add Device:**
 * Go to **Devices** -> **Add Virtual Device**.
 * **Name:** Athom Energy Monitor.
-* **Type:** Select `Athom Energy Meter (Master)` (at the bottom of the list).
+* **Type:** Select `Athom Energy Meter` (at the bottom of the list).
 * Click **Save Device**.
 
 
