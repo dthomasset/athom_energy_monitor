@@ -1,17 +1,34 @@
 /**
- * Athom Energy Meter (Master Monitor: Phases, Runtime, Health)
- * Description:
- * - PHASE BALANCE: Monitors Phase A vs B Load & Imbalance %.
- * - POOL/HEATER READY: Tracks 'dailyActiveTime' & 'hoursSinceLastRun'.
- * - GRID HEALTH: Brownout/Surge detection.
- * - VAMPIRE HUNTER: Phantom load tracking.
- * - Standard Features: Auto-Discovery, Daily Reset, Breaker Alerts.
- * 
+ * Athom Energy Meter
+ *
+ * A comprehensive energy monitoring suite for the Athom 6-Channel (ESPHome) Meter.
+ * Transforms raw sensor data into actionable home intelligence via a native, 
+ * zero-dependency EventStream connection.
+ *
+ * CORE FEATURES:
+ * 1. INTELLIGENT MONITORING
+ * - Grid Health Watchdog: Real-time detection of Voltage Sags (Brownouts) and Spikes (Surges).
+ * - Phase Balancing: Monitors Split-Phase (Leg A/B) loads and calculates Imbalance %.
+ * - Vampire Hunter: Tracks the "Lowest Daily Wattage" for every circuit to identify phantom loads.
+ * 2. APPLIANCE & SAFETY LOGIC
+ * - Breaker Monitoring: Calculates real-time Breaker Load % based on configurable amp ratings.
+ * - Runtime Tracker: Monitors "Continuous Runtime" (Current Cycle) and "Daily Active Time" (Total Minutes).
+ * - Idle Monitor: Tracks "Hours Since Last Run" (Crucial for Freeze Protection/Heater logic).
+ * 3. DATA MANAGEMENT
+ * - Native EventStream: Uses raw socket SSE for stable, sub-second reporting without polling loops.
+ * - Auto-Discovery: Automatically detects channel count (4, 6, 8+) and creates child devices.
+ * - Daily Reset: Snapshots and resets Energy (kWh) and Runtime metrics at midnight automatically.
+ * - Smart Synchronization: Updates Parent and Child devices in a single atomic snapshot for perfect data consistency.
+ * 4. CONFIGURATION
+ * - Granular Thresholds: Configurable change detection for Volts, Amps, Watts, and Hz.
+ * - Rate Limiting: Global and per-sensor hysteresis to prevent hub database flooding.
+ * - Dynamic Naming: Map friendly names (e.g., "Fridge, Solar") to channels in preferences.
+ *
  *  Contact: dthomas@gmail.com with any questions.
  */
 
 metadata {
-    definition (name: "Athom Energy Meter (Master)", namespace: "user", author: "Dan Thomasset") {
+    definition (name: "Athom Energy Meter", namespace: "user", author: "Dan Thomasset") {
         capability "Initialize"
         capability "Refresh"
         capability "Polling"
