@@ -1,7 +1,3 @@
-This is a comprehensive `README.md` designed to document every aspect of the "Master Monitor" driver we just built. It includes installation instructions, feature breakdowns, and examples for your specific Rule Machine use cases.
-
----
-
 # Athom Multi-Channel Energy Meter (Master Monitor Edition)
 
 A robust, "No-Dependency" Hubitat driver for the **Athom Multi-Channel Energy Meter** (ESPHome).
