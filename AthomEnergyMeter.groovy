@@ -11,25 +11,20 @@
  *
  * CORE FEATURES:
  * 1. INTELLIGENT MONITORING
- * - Grid Health Watchdog: Real-time detection of Voltage Sags (Brownouts) and Spikes (Surges).
- * - Phase Balancing (Optional): Monitors Split-Phase (Leg A/B) loads and calculates Imbalance %.
- * - Vampire Hunter: Tracks the "Lowest Daily Wattage" for every circuit to identify phantom loads.
+ * - Grid Health Watchdog: Detects Brownouts (Low Voltage) and Surges (High Voltage).
+ * - Phase Balancing: Monitors Split-Phase loads and calculates Imbalance %.
+ * - Vampire Hunter: Tracks the "Lowest Daily Wattage" to identify phantom loads.
  *
  * 2. APPLIANCE & SAFETY LOGIC
  * - Breaker Monitoring: Calculates real-time Breaker Load % based on configurable amp ratings.
- * - Runtime Tracker: Monitors "Continuous Runtime" (Current Cycle) and "Daily Active Time" (Total Minutes).
- * - Idle Monitor: Tracks "Hours Since Last Run" (Crucial for Freeze Protection/Heater logic).
+ * - Runtime Tracker: Monitors "Continuous Runtime" and "Daily Active Time".
+ * - Idle Monitor: Tracks "Hours Since Last Run" (Freeze Protection).
  *
  * 3. DATA MANAGEMENT
- * - Native EventStream: Uses raw socket SSE for stable, sub-second reporting without polling loops.
- * - Auto-Discovery: Automatically detects channel count (4, 6, 8+) and creates child devices.
- * - Daily Reset: Snapshots and resets Energy (kWh) and Runtime metrics at midnight automatically.
+ * - Native EventStream: Raw socket SSE for stable, sub-second reporting.
+ * - Auto-Discovery: Automatically detects channel count and creates child devices.
+ * - Daily Reset: Snapshots and resets Energy/Runtime metrics at midnight.
  * - Smart Synchronization: Updates Parent and Child devices in a single atomic snapshot.
- *
- * 4. CONFIGURATION
- * - Granular Thresholds: Configurable change detection for Volts, Amps, Watts, and Hz.
- * - Rate Limiting: Global and per-sensor hysteresis to prevent hub database flooding.
- * - Dynamic Naming: Map friendly names (e.g., "Fridge, Solar") to channels in preferences.
  */
 
 metadata {
@@ -47,13 +42,15 @@ metadata {
         attribute "temperature", "number"
         attribute "uptime", "string"
         attribute "connectionState", "string"
-        attribute "gridStatus", "string" // Normal, Brownout, Surge
         
-        // Phase Attributes (Optional)
+        // Safety Status Attributes
+        attribute "gridStatus", "string"   // Normal, Brownout, Surge
+        attribute "phaseStatus", "string"  // Balanced, Warning, Disabled
+        attribute "phaseImbalance", "number" 
+        
+        // Phase Details
         attribute "phaseA_Amps", "number"
         attribute "phaseB_Amps", "number"
-        attribute "phaseImbalance", "number" 
-        attribute "phaseStatus", "string" 
         
         command "resetDailyEnergy"
         command "disconnect"
@@ -62,40 +59,38 @@ metadata {
     }
 
     preferences {
-        section("Connection") {
+        // --- SECTION 1: CONNECTION & HARDWARE ---
+        section("Connection & Hardware") {
             input name: "ipAddress", type: "text", title: "Device IP Address", required: true
             input name: "logEnable", type: "bool", title: "Enable Debug Logging", defaultValue: true
+            input name: "tempScale", type: "enum", title: "Temperature Unit", options: ["Fahrenheit", "Celsius", "Kelvin"], defaultValue: "Fahrenheit"
         }
         
-        section("Phase Balancing (Optional)") {
-            input name: "enablePhaseMonitoring", type: "bool", title: "Enable Phase Monitoring", description: "Turn on for split-phase panels. Turn off if monitoring a single phase.", defaultValue: false
-            input name: "phaseA_Channels", type: "text", title: "Phase A Channels", description: "Comma separated (e.g: 1,3,5)", defaultValue: "1,3,5"
-            input name: "phaseB_Channels", type: "text", title: "Phase B Channels", description: "Comma separated (e.g: 2,4,6)", defaultValue: "2,4,6"
-            input name: "imbalanceThreshold", type: "number", title: "Imbalance Alert Threshold (%)", defaultValue: 50
-        }
-        
-        section("Appliance Monitor (Runtime & Duty)") {
-            input name: "activeThreshold", type: "number", title: "Active State Threshold (W)", description: "Watts required to count as 'Running'", defaultValue: 10
-        }
-
-        section("Grid Health & Breakers") {
-            input name: "minVoltage", type: "number", title: "Min Safe Voltage (Brownout)", defaultValue: 114
-            input name: "maxVoltage", type: "number", title: "Max Safe Voltage (Surge)", defaultValue: 126
+        // --- SECTION 2: CIRCUIT CONFIGURATION ---
+        section("Circuit Configuration") {
+            input name: "channelNames", type: "text", title: "Circuit Names", description: "Comma separated (e.g: Fridge, HVAC, Office...)"
             input name: "breakerSizes", type: "text", title: "Breaker Sizes (Amps)", description: "Comma separated (e.g: 15, 15, 20...)"
         }
         
-        section("Thresholds & Update Rate") {
-            input name: "sensorHysteresis", type: "number", title: "System Update Rate (seconds)", defaultValue: 5
-            input name: "voltsThreshold", type: "decimal", title: "Voltage Threshold (V)", defaultValue: 0.1
-            input name: "ampsThreshold", type: "decimal", title: "Amperage Threshold (A)", defaultValue: 0.1
-            input name: "wattsThreshold", type: "decimal", title: "Power Threshold (W)", defaultValue: 1.0
-            input name: "energyThreshold", type: "decimal", title: "Energy Threshold (kWh)", defaultValue: 0.001
-            input name: "freqThreshold", type: "decimal", title: "Frequency Threshold (Hz)", defaultValue: 0.1
+        // --- SECTION 3: SAFETY & LOGIC ---
+        section("Safety & Logic") {
+            // Phase Config & Thresholds moved here to be grouped together
+            input name: "phaseA_Channels", type: "text", title: "Phase A Channels (Split-Phase)", defaultValue: "1,3,5"
+            input name: "phaseB_Channels", type: "text", title: "Phase B Channels (Split-Phase)", defaultValue: "2,4,6"
+            input name: "imbalanceThreshold", type: "number", title: "Phase Imbalance Threshold (%)", description: "Triggers 'Warning' status above this. Set to -1 to Disable.", defaultValue: -1
+            
+            // Grid Thresholds
+            input name: "voltageLowThreshold", type: "number", title: "Brownout Threshold (V)", description: "Triggers 'Brownout' status below this.", defaultValue: 114
+            input name: "voltageHighThreshold", type: "number", title: "Surge Threshold (V)", description: "Triggers 'Surge' status above this.", defaultValue: 126
+            
+            // Appliance Logic
+            input name: "activeThreshold", type: "number", title: "Appliance 'On' Threshold (W)", description: "Watts required to count as 'Running' for metrics.", defaultValue: 10
         }
         
-        section("Naming & Units") {
-            input name: "channelNames", type: "text", title: "Circuit Names (Comma Separated)"
-            input name: "tempScale", type: "enum", title: "Temperature Scale", options: ["Celsius", "Fahrenheit", "Kelvin"], defaultValue: "Celsius"
+        // --- SECTION 4: REPORTING ---
+        section("Reporting Sensitivity") {
+            input name: "sensorHysteresis", type: "number", title: "Global Update Rate (seconds)", description: "Minimum time between updates (Anti-Flood)", defaultValue: 5
+            input name: "minReportingChangeThreshold", type: "decimal", title: "Change Threshold", description: "Min change for Volts, Amps, Watts, Hz", defaultValue: 0.1
         }
     }
 }
@@ -182,13 +177,14 @@ void parse(String description) {
 void processJson(Map json) {
     String id = json.id.toString()
     def rawValue = json.value
+    def threshold = minReportingChangeThreshold ?: 0.1
     
     // 1. Global
     if (id.contains("voltage")) {
         checkGridHealth(rawValue)
-        updateSensor("voltage", rawValue, "V", voltsThreshold)
+        updateSensor("voltage", rawValue, "V", threshold)
     }
-    else if (id.contains("frequency")) updateSensor("frequency", rawValue, "Hz", freqThreshold) 
+    else if (id.contains("frequency")) updateSensor("frequency", rawValue, "Hz", threshold)
     else if (id.contains("temperature")) processTemperature(rawValue)
     else if (id.contains("uptime")) sendEvent(name: "uptime", value: json.state)
     
@@ -237,6 +233,7 @@ void syncSystem() {
     def totalEnergy = 0.0
     def totalCurrent = 0.0
     def nowMs = now()
+    def threshold = minReportingChangeThreshold ?: 0.1
     
     // Duty Cycle Timing
     def lastTime = state.lastDutyCheck ?: nowMs
@@ -248,6 +245,7 @@ void syncSystem() {
     def phaseB = phaseB_Channels ? phaseB_Channels.split(",").collect{it.trim()} : ["2","4","6"]
     def ampsA = 0.0
     def ampsB = 0.0
+    def phaseEnabled = (imbalanceThreshold != null && imbalanceThreshold >= 0)
     
     // Breaker Config Parsing
     def breakers = []
@@ -268,8 +266,8 @@ void syncSystem() {
         totalEnergy += dailyE
         totalCurrent += a
         
-        // Phase Allocation (Only if enabled)
-        if (enablePhaseMonitoring) {
+        // Phase Allocation
+        if (phaseEnabled) {
             if (phaseA.contains(c)) ampsA += a
             else if (phaseB.contains(c)) ampsB += a
         }
@@ -285,8 +283,8 @@ void syncSystem() {
         }
 
         // 2. RUNTIME MONITOR
-        def threshold = activeThreshold ?: 10
-        def isApplianceOn = (p >= threshold)
+        def activeLimit = activeThreshold ?: 10
+        def isApplianceOn = (p >= activeLimit)
         
         if (isApplianceOn) {
             if (!state.activeStart) state.activeStart = [:]
@@ -332,19 +330,21 @@ void syncSystem() {
             }
         }
         
-        checkAndSend(child, "power", p, "W", wattsThreshold)
-        checkAndSend(child, "energy", dailyE, "kWh", energyThreshold)
-        checkAndSend(child, "amperage", a, "A", ampsThreshold)
+        checkAndSend(child, "power", p, "W", threshold)
+        checkAndSend(child, "energy", dailyE, "kWh", 0.001) // Energy always detailed
+        checkAndSend(child, "amperage", a, "A", threshold)
     }
     
     // --- PARENT UPDATES ---
-    updateSensor("power", totalPower, "W", wattsThreshold, true)
-    updateSensor("energy", totalEnergy, "kWh", energyThreshold, true)
-    updateSensor("amperage", totalCurrent, "A", ampsThreshold, true)
+    updateSensor("power", totalPower, "W", threshold, true)
+    updateSensor("energy", totalEnergy, "kWh", 0.001, true)
+    updateSensor("amperage", totalCurrent, "A", threshold, true)
     
     // --- PHASE BALANCE ---
-    if (enablePhaseMonitoring) {
+    if (phaseEnabled) {
         calculatePhaseBalance(ampsA, ampsB)
+    } else {
+        if (device.currentValue("phaseStatus") != "Disabled") sendEvent(name: "phaseStatus", value: "Disabled")
     }
 }
 
@@ -370,8 +370,8 @@ void calculatePhaseBalance(def a, def b) {
 // --- GRID HEALTH MONITOR ---
 void checkGridHealth(def voltage) {
     def v = voltage.toDouble()
-    def min = minVoltage ?: 114
-    def max = maxVoltage ?: 126
+    def min = voltageLowThreshold ?: 114
+    def max = voltageHighThreshold ?: 126
     
     String status = "Normal"
     if (v < min) status = "Brownout"
@@ -420,9 +420,19 @@ void ensureChildExists(String channel) {
 
 void processTemperature(def rawVal) {
     def val = rawVal.toDouble()
-    String unit = "°C"
-    if (tempScale == "Fahrenheit") { val = (val * 1.8) + 32; unit = "°F" }
-    else if (tempScale == "Kelvin") { val = val + 273.15; unit = "K" }
+    String unit = "°F"
+    
+    // Device reports Celsius
+    if (tempScale == "Celsius") { 
+        unit = "°C"
+    } else if (tempScale == "Kelvin") { 
+        val = val + 273.15
+        unit = "K"
+    } else {
+        // Default Fahrenheit
+        val = (val * 1.8) + 32
+    }
+    
     updateSensor("temperature", val, unit, 0.1)
 }
 
